@@ -160,10 +160,10 @@ By default, the AMIs are published to every region that AWS enables on all accou
 
 | Area | Regions |
 | --- | --- |
-| North America | `us-east-1` (N. Virginia, build region), `us-east-2` (Ohio), `us-west-1` (N. California), `us-west-2` (Oregon), `ca-central-1` (Canada Central) |
+| North America | `us-east-1` (N. Virginia, build region), `us-west-1` (N. California), `ca-central-1` (Canada Central) |
 | South America | `sa-east-1` (São Paulo) |
-| Europe | `eu-west-1` (Ireland), `eu-west-2` (London), `eu-west-3` (Paris), `eu-central-1` (Frankfurt), `eu-north-1` (Stockholm) |
-| Asia Pacific | `ap-south-1` (Mumbai), `ap-northeast-1` (Tokyo), `ap-northeast-2` (Seoul), `ap-northeast-3` (Osaka), `ap-southeast-1` (Singapore), `ap-southeast-2` (Sydney) |
+| Europe | `eu-west-1` (Ireland), `eu-central-1` (Frankfurt), `eu-north-1` (Stockholm) |
+| Asia Pacific | `ap-south-1` (Mumbai), `ap-northeast-1` (Tokyo), `ap-southeast-1` (Singapore), |
 
 In a region that isn't published, users can copy a public AMI into their own account:
 

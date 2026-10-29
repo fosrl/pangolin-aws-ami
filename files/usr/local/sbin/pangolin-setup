@@ -49,6 +49,15 @@ die() {
     exit 1
 }
 
+# Any unexpected failure is reported and recorded instead of exiting silently.
+on_error() {
+    local rc=$? line=$1
+    printf '[pangolin-setup] %sERROR:%s unexpected failure (exit %s) at line %s. See %s\n' \
+        "$RED" "$NC" "$rc" "$line" "$LOG_FILE" >&2
+    set_state failed 2>/dev/null || true
+    exit "$rc"
+}
+
 is_true() {
     case "${1,,}" in
         1 | y | yes | true | on) return 0 ;;
@@ -154,7 +163,9 @@ save_settings() {
             echo "# Pangolin AMI setup settings. Written by pangolin-setup."
             for name in "${SETTINGS[@]}"; do
                 var=PANGOLIN_$name
-                [[ -n ${!var:-} ]] && printf '%s=%s\n' "$var" "${!var}"
+                if [[ -n ${!var:-} ]]; then
+                    printf '%s=%s\n' "$var" "${!var}"
+                fi
             done
         } >"$SETUP_ENV"
     )
@@ -431,13 +442,11 @@ EOF
 }
 
 do_install() {
-    trap 'set_state failed' ERR
     ensure_docker
     fetch_installer
     set_state installing
     run_installer
     set_state complete
-    trap - ERR
     print_summary
 }
 
@@ -446,6 +455,7 @@ do_install() {
 # ---------------------------------------------------------------------------
 
 cmd_auto() {
+    trap 'on_error $LINENO' ERR
     mkdir -p "$STATE_DIR"
     exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -514,6 +524,7 @@ confirm() {
 
 cmd_interactive() {
     require_root
+    trap 'on_error $LINENO' ERR
 
     case $(get_state) in
         complete)

@@ -1,5 +1,41 @@
 # Pangolin AWS AMIs
 
+## Finding the AMI
+
+AMI IDs are different in every region, so look up the ID in the region you launch in. The AMIs are published to all [supported regions](#supported-regions). Images are named `pangolin-<edition>-ubuntu-24.04-<arch>-<version>`, where edition is `community` or `enterprise` and arch is `amd64` or `arm64`.
+
+**Latest AMI ID with the AWS CLI:**
+
+```bash
+PANGOLIN_OWNER=<PANGOLIN_ACCOUNT_ID>   # AWS account that publishes the Pangolin AMIs
+EDITION=community                     # community | enterprise
+ARCH=arm64                            # arm64 (Graviton, e.g. t4g) | amd64 (x86, e.g. t3)
+
+aws ec2 describe-images --region us-east-1 --owners "$PANGOLIN_OWNER" \
+  --filters "Name=name,Values=pangolin-${EDITION}-ubuntu-*-${ARCH}-*" "Name=state,Values=available" \
+  --query 'sort_by(Images, &CreationDate)[-1].ImageId' --output text
+```
+
+**All four editions and architectures with their latest IDs:**
+
+```bash
+aws ec2 describe-images --region us-east-1 --owners "$PANGOLIN_OWNER" \
+  --filters 'Name=name,Values=pangolin-*' 'Name=state,Values=available' \
+  --query 'reverse(sort_by(Images, &CreationDate))[].[Name, ImageId, Architecture, CreationDate]' \
+  --output table
+```
+
+**In the AWS console:**
+
+1. Switch to the region you want to launch in.
+2. Open **EC2 → Images → AMIs** and change the filter from **Owned by me** to **Public images**.
+3. Search for `pangolin-community` or `pangolin-enterprise`, and add the filter **Owner = `<PANGOLIN_ACCOUNT_ID>`** so you only see official images.
+4. Sort by **Creation date**, pick the newest image for your architecture, and click **Launch instance from AMI**.
+
+**From AWS Marketplace:** search for **Pangolin** in [AWS Marketplace](https://aws.amazon.com/marketplace), choose the Community or Enterprise listing, and subscribe. The listing shows the AMI ID for each region and offers the CloudFormation one-click launch.
+
+Every AMI installs the latest Pangolin release when it is set up, so the newest AMI only matters for OS and Docker patches.
+
 ## Launching Pangolin
 
 ### Requirements
@@ -199,7 +235,7 @@ make build                                    # all four
 make build BUILDS="community-arm64 enterprise-arm64"
 ```
 
-Each build runs a temporary instance in the build region, provisions it with `scripts/`, snapshots it, and terminates it. A build takes about 8–12 minutes. Results are written to `manifest.json`:
+Each build runs a temporary instance in the build region, provisions it with `scripts/`, snapshots it, terminates it, and copies the AMI to every region in `ami_regions` ([all default regions](#supported-regions)). The build itself takes about 8–12 minutes. Copying to all regions adds roughly 15–30 minutes, and the copies run in parallel. For a quick test build, skip the copies with `-var 'ami_regions=[]'`. Results are written to `manifest.json`, with one `region:ami-id` entry per region:
 
 ```bash
 jq -r '.builds[] | "\(.custom_data.edition)-\(.custom_data.arch): \(.artifact_id)"' manifest.json
@@ -213,7 +249,7 @@ Set them with `-var`, a `*.auto.pkrvars.hcl` file (git-ignored), or `PKR_VAR_<na
 | Variable | Default | Description |
 | --- | --- | --- |
 | `region` | `us-east-1` | Region to build in |
-| `ami_regions` | `[]` | Extra regions to copy the AMIs to |
+| `ami_regions` | [all default regions](#supported-regions) | Regions the AMIs are published to. The build region is skipped automatically. Use `[]` for the build region only |
 | `ami_public` | `false` | Make the AMIs public (see [Publishing](#publishing)) |
 | `ami_users` | `[]` | Account IDs to share the AMIs with |
 | `ami_version` | UTC timestamp | AMI version label used in names and tags (not the Pangolin version) |
@@ -226,8 +262,9 @@ Example `release.auto.pkrvars.hcl`:
 
 ```hcl
 ami_version = "2026.10.1"
-ami_regions = ["us-east-2", "us-west-2", "eu-central-1", "eu-west-1", "ap-southeast-2"]
 ami_public  = true
+# ami_regions defaults to every supported region; override to publish to fewer:
+# ami_regions = ["us-east-1", "eu-central-1"]
 ```
 
 AMI names follow `pangolin-<edition>-ubuntu-<release>-<arch>-<version>`, for example `pangolin-enterprise-ubuntu-24.04-arm64-2026.10.1`.
@@ -244,7 +281,7 @@ packer build -on-error=ask -only='pangolin.amazon-ebs.community-amd64' .   # kee
 `.github/workflows/build-ami.yml`:
 
 - **Pull requests:** `packer fmt`, `packer validate`, shellcheck.
-- **Monthly schedule and manual dispatch:** builds the four AMIs as a matrix. The manual dispatch takes inputs for which builds to run, public or private, and extra regions.
+- **Monthly schedule and manual dispatch:** builds the four AMIs as a matrix and copies them to all supported regions. The manual dispatch takes inputs for which builds to run, public or private, and an optional region list. Leave the list empty for all regions, or enter `[]` for the build region only.
 
 Setup:
 
@@ -257,13 +294,37 @@ The AMI IDs appear in the job summary and in the `manifest-*` artifacts.
 
 ## Publishing
 
+### Supported regions
+
+By default, the AMIs are published to every region that AWS enables on all accounts:
+
+| Area | Regions |
+| --- | --- |
+| North America | `us-east-1` (N. Virginia, build region), `us-east-2` (Ohio), `us-west-1` (N. California), `us-west-2` (Oregon), `ca-central-1` (Canada Central) |
+| South America | `sa-east-1` (São Paulo) |
+| Europe | `eu-west-1` (Ireland), `eu-west-2` (London), `eu-west-3` (Paris), `eu-central-1` (Frankfurt), `eu-north-1` (Stockholm) |
+| Asia Pacific | `ap-south-1` (Mumbai), `ap-northeast-1` (Tokyo), `ap-northeast-2` (Seoul), `ap-northeast-3` (Osaka), `ap-southeast-1` (Singapore), `ap-southeast-2` (Sydney) |
+
+In a region that isn't published, users can copy a public AMI into their own account:
+
+```bash
+aws ec2 copy-image --source-region us-east-1 --source-image-id ami-... \
+  --region af-south-1 --name pangolin-community-arm64
+```
+
 ### Public AMIs
 
-1. Turn off block public access for AMIs in every region you publish to (it is on by default for new accounts):
+1. Turn off block public access for AMIs in every published region (it is on by default for new accounts):
    ```bash
-   aws ec2 disable-image-block-public-access --region us-east-1
+   for r in us-east-1 us-east-2 us-west-1 us-west-2 ca-central-1 sa-east-1 \
+            eu-west-1 eu-west-2 eu-west-3 eu-central-1 eu-north-1 \
+            ap-south-1 ap-northeast-1 ap-northeast-2 ap-northeast-3 ap-southeast-1 ap-southeast-2; do
+     aws ec2 disable-image-block-public-access --region "$r"
+   done
    ```
-2. Build with `ami_public = true` and your `ami_regions`.
+2. Build with `ami_public = true`. Every regional copy is made public.
+
+Each regional copy is an EBS snapshot of about 3–4 GB of used data. All four AMIs in all 17 regions cost on the order of $10–15 per month per AMI version kept.
 
 Users can find the latest image by name:
 

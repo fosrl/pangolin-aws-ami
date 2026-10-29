@@ -17,10 +17,31 @@ variable "region" {
   description = "Region the AMIs are built in."
 }
 
+# Every region that is enabled by default on AWS accounts. Opt-in regions
+# (e.g. ap-east-1, me-south-1, af-south-1) must be enabled in the publishing
+# account before they can be added. The build region is skipped automatically.
 variable "ami_regions" {
-  type        = list(string)
-  default     = []
-  description = "Additional regions to copy the AMIs to."
+  type = list(string)
+  default = [
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "ca-central-1",
+    "sa-east-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+    "eu-central-1",
+    "eu-north-1",
+    "ap-south-1",
+    "ap-northeast-1",
+    "ap-northeast-2",
+    "ap-northeast-3",
+    "ap-southeast-1",
+    "ap-southeast-2",
+  ]
+  description = "Regions the AMIs are published to. Set to [] to keep the AMIs in the build region only."
 }
 
 variable "ami_public" {
@@ -80,6 +101,9 @@ variable "subnet_id" {
 locals {
   version = var.ami_version != "" ? var.ami_version : formatdate("YYYYMMDDhhmm", timestamp())
 
+  # The AMI is created in the build region; copy it everywhere else.
+  copy_regions = [for r in var.ami_regions : r if r != var.region]
+
   editions = {
     community  = "Community Edition"
     enterprise = "Enterprise Edition"
@@ -117,7 +141,7 @@ source "amazon-ebs" "amd64" {
   ssh_username            = "ubuntu"
   temporary_key_pair_type = "ed25519"
 
-  ami_regions   = var.ami_regions
+  ami_regions   = local.copy_regions
   ami_groups    = var.ami_public ? ["all"] : []
   ami_users     = var.ami_users
   ena_support   = true
@@ -161,7 +185,7 @@ source "amazon-ebs" "arm64" {
   ssh_username            = "ubuntu"
   temporary_key_pair_type = "ed25519"
 
-  ami_regions   = var.ami_regions
+  ami_regions   = local.copy_regions
   ami_groups    = var.ami_public ? ["all"] : []
   ami_users     = var.ami_users
   ena_support   = true

@@ -1,24 +1,24 @@
 name: Build AMIs
 
-on:
-  workflow_dispatch:
-    inputs:
-      builds:
-        description: "Builds to run (comma separated: community-amd64,community-arm64,enterprise-amd64,enterprise-arm64)"
-        default: "community-amd64,community-arm64,enterprise-amd64,enterprise-arm64"
-      ami_public:
-        description: "Make the AMIs public"
-        type: boolean
-        default: false
-      ami_regions:
-        description: 'Extra regions to copy to, as a JSON list (e.g. ["us-west-2","eu-central-1"])'
-        default: "[]"
-  # Monthly rebuild so new launches start from a patched OS and Docker.
-  # Pangolin itself is not baked in, so releases do not require a rebuild.
-  schedule:
-    - cron: "0 6 1 * *"
-  pull_request:
-    paths: ["**.pkr.hcl", "files/**", "scripts/**", "cloudformation/**", ".github/workflows/build-ami.yml"]
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       builds:
+#         description: "Builds to run (comma separated: community-amd64,community-arm64,enterprise-amd64,enterprise-arm64)"
+#         default: "community-amd64,community-arm64,enterprise-amd64,enterprise-arm64"
+#       ami_public:
+#         description: "Make the AMIs public"
+#         type: boolean
+#         default: false
+#       ami_regions:
+#         description: 'Regions to publish to, as a JSON list (e.g. ["us-east-1","eu-central-1"]). Empty = all default regions; [] = build region only.'
+#         default: ""
+#   # Monthly rebuild so new launches start from a patched OS and Docker.
+#   # Pangolin itself is not baked in, so releases do not require a rebuild.
+#   schedule:
+#     - cron: "0 6 1 * *"
+#   pull_request:
+#     paths: ["**.pkr.hcl", "files/**", "scripts/**", "cloudformation/**", ".github/workflows/build-ami.yml"]
 
 permissions:
   contents: read
@@ -77,9 +77,12 @@ jobs:
         env:
           PKR_VAR_region: ${{ env.AWS_REGION }}
           PKR_VAR_ami_public: ${{ inputs.ami_public || false }}
-          PKR_VAR_ami_regions: ${{ inputs.ami_regions || '[]' }}
           PKR_VAR_ami_version: ${{ github.run_number }}-${{ github.run_attempt }}
-        run: packer build -color=false -only="pangolin.amazon-ebs.${{ matrix.build }}" .
+          AMI_REGIONS: ${{ inputs.ami_regions }}
+        run: |
+          # Only override the region list when one was given; otherwise use the template default.
+          if [ -n "$AMI_REGIONS" ]; then export PKR_VAR_ami_regions="$AMI_REGIONS"; fi
+          packer build -color=false -only="pangolin.amazon-ebs.${{ matrix.build }}" .
       - name: Summary
         run: |
           jq -r '.builds[] | "| \(.custom_data.edition) | \(.custom_data.arch) | \(.artifact_id) |"' manifest.json > rows.md

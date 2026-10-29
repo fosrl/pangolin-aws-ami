@@ -1,0 +1,47 @@
+#!/bin/sh
+# Show Pangolin setup status at login.
+
+state=$(cat /var/lib/pangolin-ami/state 2>/dev/null || echo pending)
+config=/opt/pangolin/config/config.yml
+if [ -f "$config" ] && [ ! -f /var/lib/pangolin-ami/state ]; then
+    state=complete
+fi
+
+edition="Community Edition"
+if grep -q '^PANGOLIN_EDITION=enterprise' /etc/pangolin/ami.env 2>/dev/null; then
+    edition="Enterprise Edition"
+fi
+
+dashboard=""
+if [ -f "$config" ]; then
+    dashboard=$(sed -n 's/^[[:space:]]*dashboard_url:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' "$config" | head -n1)
+fi
+
+echo
+echo " Pangolin $edition"
+case "$state" in
+    complete)
+        echo "   Dashboard:     ${dashboard}"
+        echo "   Setup token:   sudo pangolin-setup token"
+        echo "   Install dir:   /opt/pangolin (docker compose)"
+        ;;
+    waiting-dns)
+        echo "   Waiting for DNS to point at this instance before installing."
+        echo "   Progress:      sudo tail -f /var/log/pangolin-setup.log"
+        ;;
+    installing)
+        echo "   Installing the latest Pangolin release..."
+        echo "   Progress:      sudo tail -f /var/log/pangolin-setup.log"
+        ;;
+    failed)
+        echo "   Setup failed. See /var/log/pangolin-setup.log"
+        echo "   Retry with:    sudo pangolin-setup"
+        ;;
+    needs-input)
+        echo "   Not configured. Run: sudo pangolin-setup"
+        ;;
+    *)
+        echo "   First-boot setup is starting. Status: pangolin-setup status"
+        ;;
+esac
+echo

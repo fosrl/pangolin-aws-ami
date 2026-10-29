@@ -1,0 +1,16 @@
+#cloud-config
+# EC2 user-data for a Pangolin AMI. The instance configures Pangolin on first
+# boot once the dashboard domain resolves to its public IP.
+write_files:
+  - path: /etc/pangolin/setup.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      PANGOLIN_BASE_DOMAIN=example.com
+      PANGOLIN_DASHBOARD_DOMAIN=pangolin.example.com
+      PANGOLIN_EMAIL=admin@example.com
+      # PANGOLIN_INSTALL_GERBIL=true
+      # PANGOLIN_SMTP_HOST=smtp.example.com
+      # PANGOLIN_SMTP_PORT=587
+      # PANGOLIN_SMTP_USER=noreply@example.com
+      # PANGOLIN_SMTP_PASS=change-me

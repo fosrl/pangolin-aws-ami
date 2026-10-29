@@ -1,0 +1,21 @@
+[Unit]
+Description=Pangolin first-boot setup from EC2 user-data
+Documentation=https://docs.pangolin.net
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+ConditionPathExists=!/opt/pangolin/config/config.yml
+
+[Service]
+# Type=simple so boot is never blocked: the script waits for cloud-init
+# (which writes /etc/pangolin/setup.env) and for DNS on its own.
+Type=simple
+ExecStart=/usr/local/sbin/pangolin-setup --auto
+Restart=no
+TimeoutStartSec=0
+# Output also goes to the serial console, so the setup token can be read with
+# `aws ec2 get-console-output` without SSH.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

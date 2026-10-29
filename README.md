@@ -1,5 +1,112 @@
 # Pangolin AWS AMIs
 
+## Launching Pangolin
+
+### Requirements
+
+- **DNS:** an A record for the dashboard domain and a wildcard `*.<base domain>`, both pointing to the instance's public IP. Use an Elastic IP.
+- **Security group:** TCP 80, 443 and UDP 51820 (sites), 21820 (clients), UDP 443 (HTTP/3, optional), and TCP 22 from your IP.
+- **Instance size:** `t3.small` or `t4g.small` or larger. The Graviton (`t4g`) AMIs are the cheaper choice.
+
+### Option A: CloudFormation (one click)
+
+[`cloudformation/pangolin.yaml`](cloudformation/pangolin.yaml) creates the security group, instance and Elastic IP. If you give it a Route 53 hosted zone ID, it also creates both DNS records.
+
+```bash
+aws cloudformation deploy --stack-name pangolin \
+  --template-file cloudformation/pangolin.yaml \
+  --parameter-overrides \
+    ImageId=ami-0123456789abcdef0 InstanceType=t4g.small \
+    BaseDomain=example.com LetsEncryptEmail=admin@example.com \
+    HostedZoneId=Z0123456789ABC KeyName=my-key \
+    VpcId=vpc-... SubnetId=subnet-... SSHLocation=203.0.113.10/32
+
+aws cloudformation describe-stacks --stack-name pangolin --query 'Stacks[0].Outputs'
+```
+
+The `SetupTokenCommand` output prints the token once installation finishes.
+
+### Option B: EC2 API / CLI with user-data
+
+Pass the settings as user-data. Two formats are accepted:
+
+**Plain `KEY=VALUE` lines** (simplest; [`examples/user-data.env`](examples/user-data.env)):
+
+```
+PANGOLIN_BASE_DOMAIN=example.com
+PANGOLIN_EMAIL=admin@example.com
+```
+
+**cloud-config** that writes `/etc/pangolin/setup.env` ([`examples/user-data.yaml`](examples/user-data.yaml)). Use this form to combine the settings with other cloud-init configuration.
+
+```bash
+aws ec2 run-instances --image-id ami-... --instance-type t4g.small \
+  --subnet-id subnet-... --security-group-ids sg-... --key-name my-key \
+  --user-data file://examples/user-data.env
+```
+
+[`examples/launch.sh`](examples/launch.sh) does the full flow: it looks up the newest AMI, launches it, attaches an Elastic IP, prints the DNS records to create, and waits for the setup token.
+
+### Option C: SSH wizard
+
+Launch without user-data, then SSH in:
+
+```bash
+ssh ubuntu@<public-ip>
+```
+
+On login you're offered the setup wizard (or run `sudo pangolin-setup`). It asks for the domains, email, tunneling and optional SMTP, checks DNS, and then installs. The edition is fixed by the AMI.
+
+### Settings
+
+| Key | Required | Default | Used for |
+| --- | --- | --- | --- |
+| `PANGOLIN_BASE_DOMAIN` | yes¹ | derived from the dashboard domain | `domains.domain1.base_domain` (resources are served under it) |
+| `PANGOLIN_DASHBOARD_DOMAIN` | no | `pangolin.<base domain>` | `app.dashboard_url`, `gerbil.base_endpoint`, CORS origin |
+| `PANGOLIN_EMAIL` | yes | — | Let's Encrypt account (alias: `PANGOLIN_LETSENCRYPT_EMAIL`) |
+| `PANGOLIN_INSTALL_GERBIL` | no | `true` | WireGuard tunneling. `false` makes Pangolin a plain reverse proxy |
+| `PANGOLIN_ENABLE_IPV6` | no | `true` if the instance has IPv6 | IPv6 on the Docker network |
+| `PANGOLIN_ENABLE_MAXMIND` | no | `true` | GeoLite2 country/ASN databases for geo-blocking |
+| `PANGOLIN_SMTP_HOST`, `_PORT`, `_USER`, `_PASS`, `_NO_REPLY` | no | port `587` | Email. Enabled when `SMTP_HOST` is set |
+| `PANGOLIN_WAIT_FOR_DNS` | no | `true` | Wait for the dashboard domain to resolve before installing |
+| `PANGOLIN_DNS_TIMEOUT` | no | `1800` | Seconds to wait for DNS before installing anyway |
+| `PANGOLIN_INSTALLER_URL` | no | latest release | Override the installer binary (testing) |
+
+¹ Give either `PANGOLIN_BASE_DOMAIN` or `PANGOLIN_DASHBOARD_DOMAIN`. If only the dashboard domain is given, the base domain is that domain with its first label removed (`pangolin.example.com` → `example.com`). Set the base domain explicitly if that is wrong for you.
+
+User-data can be read by any process on the instance through IMDS. Prefer adding SMTP credentials afterwards in `/opt/pangolin/config/config.yml` over passing them in user-data.
+
+### After launch
+
+```bash
+pangolin-setup status        # pending | needs-input | waiting-dns | installing | complete | failed
+sudo pangolin-setup token    # initial admin setup token
+sudo tail -f /var/log/pangolin-setup.log
+```
+
+The setup token is also written to the serial console, so you can read it without SSH:
+
+```bash
+aws ec2 get-console-output --instance-id i-... --latest --output text | grep 'Setup token'
+```
+
+Open `https://<dashboard domain>/auth/initial-setup`, paste the token, and create the admin account. On the **Enterprise** AMI, activate your license under **Server Admin → License** (`/admin/license`).
+
+### Updating Pangolin
+
+```bash
+cd /opt/pangolin
+sudo docker compose pull && sudo docker compose up -d
+```
+
+See the [update guide](https://docs.pangolin.net/self-host/how-to-update) for version-specific notes.
+
+### Troubleshooting
+
+- **Stuck in `waiting-dns`:** check that `dig +short pangolin.example.com @1.1.1.1` returns the instance's public IP. Setup continues anyway after `PANGOLIN_DNS_TIMEOUT`. If you're behind a load balancer, set `PANGOLIN_WAIT_FOR_DNS=false`.
+- **Certificate errors:** after fixing DNS, run `cd /opt/pangolin && sudo docker compose restart traefik`.
+- **`failed`:** read `/var/log/pangolin-setup.log`, fix the cause, then run `sudo pangolin-setup`. If a partial install left `/opt/pangolin/config/config.yml` behind, remove `/opt/pangolin/*` first.
+
 Packer pipeline that builds Amazon Machine Images for [Pangolin](https://github.com/fosrl/pangolin) in two editions and two architectures:
 
 | Build              | Edition            | Architecture      | Default instance |
@@ -186,113 +293,6 @@ Recommended listings are **Pangolin Community Edition** (free) and **Pangolin En
 Version notes should say that each AMI installs the latest Pangolin release at launch. The listing version tracks the OS image, not Pangolin.
 
 ---
-
-## Launching Pangolin
-
-### Requirements
-
-- **DNS:** an A record for the dashboard domain and a wildcard `*.<base domain>`, both pointing to the instance's public IP. Use an Elastic IP.
-- **Security group:** TCP 80, 443 and UDP 51820 (sites), 21820 (clients), UDP 443 (HTTP/3, optional), and TCP 22 from your IP.
-- **Instance size:** `t3.small` or `t4g.small` or larger. The Graviton (`t4g`) AMIs are the cheaper choice.
-
-### Option A: CloudFormation (one click)
-
-[`cloudformation/pangolin.yaml`](cloudformation/pangolin.yaml) creates the security group, instance and Elastic IP. If you give it a Route 53 hosted zone ID, it also creates both DNS records.
-
-```bash
-aws cloudformation deploy --stack-name pangolin \
-  --template-file cloudformation/pangolin.yaml \
-  --parameter-overrides \
-    ImageId=ami-0123456789abcdef0 InstanceType=t4g.small \
-    BaseDomain=example.com LetsEncryptEmail=admin@example.com \
-    HostedZoneId=Z0123456789ABC KeyName=my-key \
-    VpcId=vpc-... SubnetId=subnet-... SSHLocation=203.0.113.10/32
-
-aws cloudformation describe-stacks --stack-name pangolin --query 'Stacks[0].Outputs'
-```
-
-The `SetupTokenCommand` output prints the token once installation finishes.
-
-### Option B: EC2 API / CLI with user-data
-
-Pass the settings as user-data. Two formats are accepted:
-
-**Plain `KEY=VALUE` lines** (simplest; [`examples/user-data.env`](examples/user-data.env)):
-
-```
-PANGOLIN_BASE_DOMAIN=example.com
-PANGOLIN_EMAIL=admin@example.com
-```
-
-**cloud-config** that writes `/etc/pangolin/setup.env` ([`examples/user-data.yaml`](examples/user-data.yaml)). Use this form to combine the settings with other cloud-init configuration.
-
-```bash
-aws ec2 run-instances --image-id ami-... --instance-type t4g.small \
-  --subnet-id subnet-... --security-group-ids sg-... --key-name my-key \
-  --user-data file://examples/user-data.env
-```
-
-[`examples/launch.sh`](examples/launch.sh) does the full flow: it looks up the newest AMI, launches it, attaches an Elastic IP, prints the DNS records to create, and waits for the setup token.
-
-### Option C: SSH wizard
-
-Launch without user-data, then SSH in:
-
-```bash
-ssh ubuntu@<public-ip>
-```
-
-On login you're offered the setup wizard (or run `sudo pangolin-setup`). It asks for the domains, email, tunneling and optional SMTP, checks DNS, and then installs. The edition is fixed by the AMI.
-
-### Settings
-
-| Key | Required | Default | Used for |
-| --- | --- | --- | --- |
-| `PANGOLIN_BASE_DOMAIN` | yes¹ | derived from the dashboard domain | `domains.domain1.base_domain` (resources are served under it) |
-| `PANGOLIN_DASHBOARD_DOMAIN` | no | `pangolin.<base domain>` | `app.dashboard_url`, `gerbil.base_endpoint`, CORS origin |
-| `PANGOLIN_EMAIL` | yes | — | Let's Encrypt account (alias: `PANGOLIN_LETSENCRYPT_EMAIL`) |
-| `PANGOLIN_INSTALL_GERBIL` | no | `true` | WireGuard tunneling. `false` makes Pangolin a plain reverse proxy |
-| `PANGOLIN_ENABLE_IPV6` | no | `true` if the instance has IPv6 | IPv6 on the Docker network |
-| `PANGOLIN_ENABLE_MAXMIND` | no | `true` | GeoLite2 country/ASN databases for geo-blocking |
-| `PANGOLIN_SMTP_HOST`, `_PORT`, `_USER`, `_PASS`, `_NO_REPLY` | no | port `587` | Email. Enabled when `SMTP_HOST` is set |
-| `PANGOLIN_WAIT_FOR_DNS` | no | `true` | Wait for the dashboard domain to resolve before installing |
-| `PANGOLIN_DNS_TIMEOUT` | no | `1800` | Seconds to wait for DNS before installing anyway |
-| `PANGOLIN_INSTALLER_URL` | no | latest release | Override the installer binary (testing) |
-
-¹ Give either `PANGOLIN_BASE_DOMAIN` or `PANGOLIN_DASHBOARD_DOMAIN`. If only the dashboard domain is given, the base domain is that domain with its first label removed (`pangolin.example.com` → `example.com`). Set the base domain explicitly if that is wrong for you.
-
-User-data can be read by any process on the instance through IMDS. Prefer adding SMTP credentials afterwards in `/opt/pangolin/config/config.yml` over passing them in user-data.
-
-### After launch
-
-```bash
-pangolin-setup status        # pending | needs-input | waiting-dns | installing | complete | failed
-sudo pangolin-setup token    # initial admin setup token
-sudo tail -f /var/log/pangolin-setup.log
-```
-
-The setup token is also written to the serial console, so you can read it without SSH:
-
-```bash
-aws ec2 get-console-output --instance-id i-... --latest --output text | grep 'Setup token'
-```
-
-Open `https://<dashboard domain>/auth/initial-setup`, paste the token, and create the admin account. On the **Enterprise** AMI, activate your license under **Server Admin → License** (`/admin/license`).
-
-### Updating Pangolin
-
-```bash
-cd /opt/pangolin
-sudo docker compose pull && sudo docker compose up -d
-```
-
-See the [update guide](https://docs.pangolin.net/self-host/how-to-update) for version-specific notes.
-
-### Troubleshooting
-
-- **Stuck in `waiting-dns`:** check that `dig +short pangolin.example.com @1.1.1.1` returns the instance's public IP. Setup continues anyway after `PANGOLIN_DNS_TIMEOUT`. If you're behind a load balancer, set `PANGOLIN_WAIT_FOR_DNS=false`.
-- **Certificate errors:** after fixing DNS, run `cd /opt/pangolin && sudo docker compose restart traefik`.
-- **`failed`:** read `/var/log/pangolin-setup.log`, fix the cause, then run `sudo pangolin-setup`. If a partial install left `/opt/pangolin/config/config.yml` behind, remove `/opt/pangolin/*` first.
 
 ## Repository layout
 

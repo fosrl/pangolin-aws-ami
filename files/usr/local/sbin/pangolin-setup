@@ -18,22 +18,17 @@ STATE_FILE=$STATE_DIR/state
 TOKEN_FILE=$STATE_DIR/setup-token
 LOCK_FILE=$STATE_DIR/lock
 LOG_FILE=/var/log/pangolin-setup.log
-AMI_ENV=/etc/pangolin/ami.env
 SETUP_ENV=/etc/pangolin/setup.env
 INSTALLER_SCRIPT_URL=https://static.pangolin.net/get-installer.sh
 IMDS=http://169.254.169.254/latest
 
 # Settings accepted from user-data / setup.env, without the PANGOLIN_ prefix.
 SETTINGS=(
-    BASE_DOMAIN DASHBOARD_DOMAIN EMAIL
+    EDITION BASE_DOMAIN DASHBOARD_DOMAIN EMAIL
     INSTALL_GERBIL ENABLE_IPV6 ENABLE_MAXMIND
     SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS SMTP_NO_REPLY
     WAIT_FOR_DNS DNS_TIMEOUT INSTALLER_URL
 )
-
-PANGOLIN_EDITION=community
-# shellcheck source=/dev/null
-[[ -f $AMI_ENV ]] && . "$AMI_ENV"
 
 BOLD=$'\033[1m'
 GREEN=$'\033[0;32m'
@@ -68,7 +63,14 @@ is_true() {
 bool() { if is_true "$1"; then echo true; else echo false; fi; }
 
 edition_label() {
-    if [[ $PANGOLIN_EDITION == enterprise ]]; then echo "Enterprise Edition"; else echo "Community Edition"; fi
+    if [[ ${1:-${PANGOLIN_EDITION:-community}} == enterprise ]]; then echo "Enterprise Edition"; else echo "Community Edition"; fi
+}
+
+# The edition of an existing install, read from the image in docker-compose.yml.
+installed_edition() {
+    local compose=$INSTALL_DIR/docker-compose.yml
+    [[ -r $compose ]] || return 1
+    if grep -qE 'fosrl/pangolin:ee-' "$compose"; then echo enterprise; else echo community; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -188,6 +190,14 @@ valid_domain() {
 # The base domain feeds domains.domain1.base_domain and the dashboard domain
 # feeds app.dashboard_url / gerbil.base_endpoint, so both are always resolved:
 # either may be given and the other is derived.
+resolve_edition() {
+    local edition=${PANGOLIN_EDITION:-}
+    case "${edition,,}" in
+        "" | ce | community) PANGOLIN_EDITION=community ;;
+        ee | enterprise) PANGOLIN_EDITION=enterprise ;;
+    esac
+}
+
 resolve_domains() {
     PANGOLIN_BASE_DOMAIN=$(normalize_domain "${PANGOLIN_BASE_DOMAIN:-}")
     PANGOLIN_DASHBOARD_DOMAIN=$(normalize_domain "${PANGOLIN_DASHBOARD_DOMAIN:-}")
@@ -208,6 +218,9 @@ resolve_domains() {
 # Prints one problem per line; returns non-zero if anything is wrong.
 validate_settings() {
     local problems=()
+    if [[ $PANGOLIN_EDITION != community && $PANGOLIN_EDITION != enterprise ]]; then
+        problems+=("PANGOLIN_EDITION '$PANGOLIN_EDITION' must be community or enterprise")
+    fi
     if [[ -z ${PANGOLIN_BASE_DOMAIN:-} ]]; then
         problems+=("PANGOLIN_BASE_DOMAIN (or PANGOLIN_DASHBOARD_DOMAIN) is not set")
     elif ! valid_domain "$PANGOLIN_BASE_DOMAIN"; then
@@ -469,6 +482,7 @@ cmd_auto() {
     cloud-init status --wait >/dev/null 2>&1 || true
 
     load_settings
+    resolve_edition
     resolve_domains
 
     local problems
@@ -541,7 +555,7 @@ cmd_interactive() {
     clear || true
     cat <<EOF
 ${BOLD}=================================================================${NC}
- ${GREEN}Welcome to Pangolin${NC} - $(edition_label)
+ ${GREEN}Welcome to Pangolin${NC}
 ${BOLD}=================================================================${NC}
 
  This will configure Pangolin on this instance using the latest
@@ -553,7 +567,19 @@ ${BOLD}=================================================================${NC}
 EOF
 
     load_settings
+    resolve_edition
     resolve_domains
+
+    local edition_default=n
+    [[ $PANGOLIN_EDITION == enterprise ]] && edition_default=y
+    echo " The Enterprise Edition is free for personal use and for businesses"
+    echo " under \$100K USD gross annual revenue. See https://docs.pangolin.net/self-host/enterprise-edition"
+    if confirm "Install the Enterprise Edition?" "$edition_default"; then
+        PANGOLIN_EDITION=enterprise
+    else
+        PANGOLIN_EDITION=community
+    fi
+    echo
 
     local base dashboard
     while true; do
@@ -634,12 +660,16 @@ EOF
 }
 
 cmd_status() {
-    local state dashboard=""
+    local state dashboard="" edition
     state=$(get_state)
     if [[ -f $INSTALL_DIR/config/config.yml ]]; then
         dashboard=$(sed -n 's/^[[:space:]]*dashboard_url:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' "$INSTALL_DIR/config/config.yml" | head -n1)
     fi
-    echo "Pangolin $(edition_label)"
+    if edition=$(installed_edition); then
+        echo "Pangolin $(edition_label "$edition")"
+    else
+        echo "Pangolin"
+    fi
     echo "  Setup state: $state"
     [[ -n $dashboard ]] && echo "  Dashboard:   $dashboard"
     case $state in

@@ -1,19 +1,11 @@
 #!/bin/bash
 # Install the Pangolin first-boot tooling. Pangolin itself is NOT installed
 # here: the latest installer is fetched when an instance is configured, so the
-# AMI does not pin a Pangolin version.
+# AMI does not pin a Pangolin version. The edition (community or enterprise)
+# is chosen per instance through PANGOLIN_EDITION, not baked into the AMI.
 set -euo pipefail
 
-: "${PANGOLIN_EDITION:?PANGOLIN_EDITION must be community or enterprise}"
 : "${AMI_VERSION:?AMI_VERSION must be set}"
-
-case "$PANGOLIN_EDITION" in
-    community | enterprise) ;;
-    *)
-        echo "Unknown PANGOLIN_EDITION: $PANGOLIN_EDITION" >&2
-        exit 1
-        ;;
-esac
 
 # Files uploaded by Packer to /tmp/pangolin-ami-files mirror the target paths.
 cp -a /tmp/pangolin-ami-files/. /
@@ -29,7 +21,6 @@ chmod 0755 /etc/pangolin
 
 cat >/etc/pangolin/ami.env <<EOM
 # Baked into the AMI at build time. Do not edit.
-PANGOLIN_EDITION=${PANGOLIN_EDITION}
 PANGOLIN_AMI_VERSION=${AMI_VERSION}
 PANGOLIN_AMI_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOM

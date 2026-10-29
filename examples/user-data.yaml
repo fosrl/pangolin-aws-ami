@@ -6,6 +6,7 @@ write_files:
     permissions: "0600"
     owner: root:root
     content: |
+      PANGOLIN_EDITION=community
       PANGOLIN_BASE_DOMAIN=example.com
       PANGOLIN_DASHBOARD_DOMAIN=pangolin.example.com
       PANGOLIN_EMAIL=admin@example.com

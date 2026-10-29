@@ -4,8 +4,8 @@ name: Build AMIs
 #   workflow_dispatch:
 #     inputs:
 #       builds:
-#         description: "Builds to run (comma separated: community-amd64,community-arm64,enterprise-amd64,enterprise-arm64)"
-#         default: "community-amd64,community-arm64,enterprise-amd64,enterprise-arm64"
+#         description: "Builds to run (comma separated: amd64,arm64)"
+#         default: "amd64,arm64"
 #       ami_public:
 #         description: "Make the AMIs public"
 #         type: boolean
@@ -53,7 +53,7 @@ jobs:
     steps:
       - id: set
         env:
-          BUILDS: ${{ inputs.builds || 'community-amd64,community-arm64,enterprise-amd64,enterprise-arm64' }}
+          BUILDS: ${{ inputs.builds || 'amd64,arm64' }}
         run: echo "builds=$(jq -cn --arg b "$BUILDS" '$b | split(",") | map(gsub("\\s"; ""))')" >> "$GITHUB_OUTPUT"
 
   build:
@@ -85,8 +85,8 @@ jobs:
           packer build -color=false -only="pangolin.amazon-ebs.${{ matrix.build }}" .
       - name: Summary
         run: |
-          jq -r '.builds[] | "| \(.custom_data.edition) | \(.custom_data.arch) | \(.artifact_id) |"' manifest.json > rows.md
-          { echo "| Edition | Arch | AMIs (region:id) |"; echo "|---|---|---|"; cat rows.md; } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.builds[] | "| \(.custom_data.arch) | \(.artifact_id) |"' manifest.json > rows.md
+          { echo "| Arch | AMIs (region:id) |"; echo "|---|---|"; cat rows.md; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: manifest-${{ matrix.build }}

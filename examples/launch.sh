@@ -16,12 +16,12 @@ DASHBOARD_DOMAIN=${DASHBOARD_DOMAIN:-pangolin.$BASE_DOMAIN}
 if [[ $ARCH == arm64 ]]; then INSTANCE_TYPE=${INSTANCE_TYPE:-t4g.small}; else INSTANCE_TYPE=${INSTANCE_TYPE:-t3.small}; fi
 
 AMI_ID=$(aws ec2 describe-images --owners "$AMI_OWNER" \
-    --filters "Name=name,Values=pangolin-${EDITION}-ubuntu-*-${ARCH}-*" "Name=state,Values=available" \
+    --filters "Name=name,Values=pangolin-ubuntu-*-${ARCH}-*" "Name=state,Values=available" \
     --query 'sort_by(Images, &CreationDate)[-1].ImageId' --output text)
 echo "AMI: $AMI_ID"
 
-USER_DATA=$(printf 'PANGOLIN_BASE_DOMAIN=%s\nPANGOLIN_DASHBOARD_DOMAIN=%s\nPANGOLIN_EMAIL=%s\n' \
-    "$BASE_DOMAIN" "$DASHBOARD_DOMAIN" "$EMAIL")
+USER_DATA=$(printf 'PANGOLIN_EDITION=%s\nPANGOLIN_BASE_DOMAIN=%s\nPANGOLIN_DASHBOARD_DOMAIN=%s\nPANGOLIN_EMAIL=%s\n' \
+    "$EDITION" "$BASE_DOMAIN" "$DASHBOARD_DOMAIN" "$EMAIL")
 
 INSTANCE_ID=$(aws ec2 run-instances \
     --image-id "$AMI_ID" --instance-type "$INSTANCE_TYPE" \

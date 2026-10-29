@@ -46,7 +46,7 @@ variable "ami_regions" {
 
 variable "ami_public" {
   type        = bool
-  default     = false
+  default     = true
   description = "Make the AMIs public. Requires block public access for AMIs to be disabled in each region."
 }
 
@@ -104,11 +104,6 @@ locals {
   # The AMI is created in the build region; copy it everywhere else.
   copy_regions = [for r in var.ami_regions : r if r != var.region]
 
-  editions = {
-    community  = "Community Edition"
-    enterprise = "Enterprise Edition"
-  }
-
   common_tags = {
     "Application"          = "Pangolin"
     "pangolin:ami-version" = local.version
@@ -119,7 +114,7 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Sources (one per architecture; editions are set in the build block)
+# Sources (one per architecture)
 # ---------------------------------------------------------------------------
 
 source "amazon-ebs" "amd64" {
@@ -211,45 +206,28 @@ source "amazon-ebs" "arm64" {
 }
 
 # ---------------------------------------------------------------------------
-# Build: {community, enterprise} x {amd64, arm64}
+# Build: one AMI per architecture. Each AMI installs either edition; the
+# edition is chosen at launch with PANGOLIN_EDITION (community | enterprise).
 #
 # Build a single image with e.g.:
-#   packer build -only='pangolin.amazon-ebs.community-amd64' .
+#   packer build -only='pangolin.amazon-ebs.arm64' .
 # ---------------------------------------------------------------------------
 
 build {
   name = "pangolin"
 
   source "source.amazon-ebs.amd64" {
-    name            = "community-amd64"
-    ami_name        = "pangolin-community-ubuntu-${var.ubuntu_release}-amd64-${local.version}"
-    ami_description = "Pangolin ${local.editions.community} on Ubuntu ${var.ubuntu_release} (amd64). Installs the latest Pangolin release on first boot."
-    tags            = merge(local.common_tags, { Name = "pangolin-community-amd64-${local.version}", "pangolin:edition" = "community", "pangolin:arch" = "amd64" })
-    snapshot_tags   = merge(local.common_tags, { Name = "pangolin-community-amd64-${local.version}" })
+    ami_name        = "pangolin-ubuntu-${var.ubuntu_release}-amd64-${local.version}"
+    ami_description = "Pangolin (Community or Enterprise Edition) on Ubuntu ${var.ubuntu_release} (amd64). Installs the latest Pangolin release on first boot."
+    tags            = merge(local.common_tags, { Name = "pangolin-amd64-${local.version}", "pangolin:arch" = "amd64" })
+    snapshot_tags   = merge(local.common_tags, { Name = "pangolin-amd64-${local.version}" })
   }
 
   source "source.amazon-ebs.arm64" {
-    name            = "community-arm64"
-    ami_name        = "pangolin-community-ubuntu-${var.ubuntu_release}-arm64-${local.version}"
-    ami_description = "Pangolin ${local.editions.community} on Ubuntu ${var.ubuntu_release} (arm64). Installs the latest Pangolin release on first boot."
-    tags            = merge(local.common_tags, { Name = "pangolin-community-arm64-${local.version}", "pangolin:edition" = "community", "pangolin:arch" = "arm64" })
-    snapshot_tags   = merge(local.common_tags, { Name = "pangolin-community-arm64-${local.version}" })
-  }
-
-  source "source.amazon-ebs.amd64" {
-    name            = "enterprise-amd64"
-    ami_name        = "pangolin-enterprise-ubuntu-${var.ubuntu_release}-amd64-${local.version}"
-    ami_description = "Pangolin ${local.editions.enterprise} on Ubuntu ${var.ubuntu_release} (amd64). Installs the latest Pangolin release on first boot."
-    tags            = merge(local.common_tags, { Name = "pangolin-enterprise-amd64-${local.version}", "pangolin:edition" = "enterprise", "pangolin:arch" = "amd64" })
-    snapshot_tags   = merge(local.common_tags, { Name = "pangolin-enterprise-amd64-${local.version}" })
-  }
-
-  source "source.amazon-ebs.arm64" {
-    name            = "enterprise-arm64"
-    ami_name        = "pangolin-enterprise-ubuntu-${var.ubuntu_release}-arm64-${local.version}"
-    ami_description = "Pangolin ${local.editions.enterprise} on Ubuntu ${var.ubuntu_release} (arm64). Installs the latest Pangolin release on first boot."
-    tags            = merge(local.common_tags, { Name = "pangolin-enterprise-arm64-${local.version}", "pangolin:edition" = "enterprise", "pangolin:arch" = "arm64" })
-    snapshot_tags   = merge(local.common_tags, { Name = "pangolin-enterprise-arm64-${local.version}" })
+    ami_name        = "pangolin-ubuntu-${var.ubuntu_release}-arm64-${local.version}"
+    ami_description = "Pangolin (Community or Enterprise Edition) on Ubuntu ${var.ubuntu_release} (arm64). Installs the latest Pangolin release on first boot."
+    tags            = merge(local.common_tags, { Name = "pangolin-arm64-${local.version}", "pangolin:arch" = "arm64" })
+    snapshot_tags   = merge(local.common_tags, { Name = "pangolin-arm64-${local.version}" })
   }
 
   provisioner "shell" {
@@ -267,7 +245,6 @@ build {
   provisioner "shell" {
     execute_command = "chmod +x {{ .Path }}; sudo -E env {{ .Vars }} bash '{{ .Path }}'"
     environment_vars = [
-      "PANGOLIN_EDITION=${split("-", source.name)[0]}",
       "AMI_VERSION=${local.version}",
       "DEBIAN_FRONTEND=noninteractive",
     ]
@@ -284,8 +261,7 @@ build {
     output     = "${path.root}/manifest.json"
     strip_path = true
     custom_data = {
-      edition     = split("-", source.name)[0]
-      arch        = split("-", source.name)[1]
+      arch        = source.name
       ami_version = local.version
     }
   }

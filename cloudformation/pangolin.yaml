@@ -8,7 +8,7 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: Pangolin }
-        Parameters: [BaseDomain, DashboardDomain, LetsEncryptEmail, InstallGerbil]
+        Parameters: [Edition, BaseDomain, DashboardDomain, LetsEncryptEmail, InstallGerbil]
       - Label: { default: DNS }
         Parameters: [HostedZoneId]
       - Label: { default: Instance }
@@ -18,6 +18,7 @@ Metadata:
       - Label: { default: Email (optional) }
         Parameters: [SmtpHost, SmtpPort, SmtpUser, SmtpPassword, SmtpNoReply]
     ParameterLabels:
+      Edition: { default: Pangolin edition }
       BaseDomain: { default: Base domain }
       DashboardDomain: { default: Dashboard domain }
       LetsEncryptEmail: { default: Let's Encrypt email }
@@ -27,6 +28,14 @@ Metadata:
       SSHLocation: { default: Allowed SSH CIDR }
 
 Parameters:
+  Edition:
+    Type: String
+    Default: community
+    AllowedValues: [community, enterprise]
+    Description: >-
+      community or enterprise. The Enterprise Edition is free for personal use and
+      for businesses under $100K USD gross annual revenue; activate a license key
+      under Server Admin -> License after setup.
   BaseDomain:
     Type: String
     Description: Root domain without subdomain, e.g. example.com. Resources are served under this domain.
@@ -56,7 +65,7 @@ Parameters:
       Otherwise create them yourself using the PublicIp output.
   ImageId:
     Type: AWS::EC2::Image::Id
-    Description: Pangolin Community or Enterprise AMI ID. Its architecture must match InstanceType.
+    Description: Pangolin AMI ID for this region. Its architecture (amd64 or arm64) must match InstanceType.
   InstanceType:
     Type: String
     Default: t3.small
@@ -148,6 +157,7 @@ Resources:
               permissions: "0600"
               owner: root:root
               content: |
+                PANGOLIN_EDITION=${Edition}
                 PANGOLIN_BASE_DOMAIN=${BaseDomain}
                 PANGOLIN_DASHBOARD_DOMAIN=${DashboardDomain}
                 PANGOLIN_EMAIL=${LetsEncryptEmail}

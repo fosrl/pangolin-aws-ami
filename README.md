@@ -154,6 +154,24 @@ Packer pipeline that builds Amazon Machine Images for [Pangolin](https://github.
 
 **The AMIs do not pin a Pangolin version.** They contain Ubuntu 24.04, Docker and a first-boot setup tool. When an instance is configured, it downloads the latest Pangolin installer, which pulls the matching latest Pangolin, Gerbil and Traefik images. New Pangolin releases need no AMI rebuild. Rebuild only to refresh the OS and Docker layer (CI does this monthly).
 
+### Supported regions
+
+By default, the AMIs are published to every region that AWS enables on all accounts:
+
+| Area | Regions |
+| --- | --- |
+| North America | `us-east-1` (N. Virginia, build region), `us-east-2` (Ohio), `us-west-1` (N. California), `us-west-2` (Oregon), `ca-central-1` (Canada Central) |
+| South America | `sa-east-1` (São Paulo) |
+| Europe | `eu-west-1` (Ireland), `eu-west-2` (London), `eu-west-3` (Paris), `eu-central-1` (Frankfurt), `eu-north-1` (Stockholm) |
+| Asia Pacific | `ap-south-1` (Mumbai), `ap-northeast-1` (Tokyo), `ap-northeast-2` (Seoul), `ap-northeast-3` (Osaka), `ap-southeast-1` (Singapore), `ap-southeast-2` (Sydney) |
+
+In a region that isn't published, users can copy a public AMI into their own account:
+
+```bash
+aws ec2 copy-image --source-region us-east-1 --source-image-id ami-... \
+  --region af-south-1 --name pangolin-community-arm64
+```
+
 ## How it works
 
 ```
@@ -274,100 +292,4 @@ AMI names follow `pangolin-<edition>-ubuntu-<release>-<arch>-<version>`, for exa
 ```bash
 PACKER_LOG=1 packer build -only='pangolin.amazon-ebs.community-amd64' .
 packer build -on-error=ask -only='pangolin.amazon-ebs.community-amd64' .   # keep the instance for inspection
-```
-
-### CI (GitHub Actions)
-
-`.github/workflows/build-ami.yml`:
-
-- **Pull requests:** `packer fmt`, `packer validate`, shellcheck.
-- **Monthly schedule and manual dispatch:** builds the four AMIs as a matrix and copies them to all supported regions. The manual dispatch takes inputs for which builds to run, public or private, and an optional region list. Leave the list empty for all regions, or enter `[]` for the build region only.
-
-Setup:
-
-1. Create an IAM role trusted by GitHub OIDC for this repository, with [`iam/packer-policy.json`](iam/packer-policy.json) attached.
-2. Add the repository secret `AWS_PACKER_ROLE_ARN`, and optionally the repository variable `AWS_REGION`.
-
-The AMI IDs appear in the job summary and in the `manifest-*` artifacts.
-
----
-
-## Publishing
-
-### Supported regions
-
-By default, the AMIs are published to every region that AWS enables on all accounts:
-
-| Area | Regions |
-| --- | --- |
-| North America | `us-east-1` (N. Virginia, build region), `us-east-2` (Ohio), `us-west-1` (N. California), `us-west-2` (Oregon), `ca-central-1` (Canada Central) |
-| South America | `sa-east-1` (São Paulo) |
-| Europe | `eu-west-1` (Ireland), `eu-west-2` (London), `eu-west-3` (Paris), `eu-central-1` (Frankfurt), `eu-north-1` (Stockholm) |
-| Asia Pacific | `ap-south-1` (Mumbai), `ap-northeast-1` (Tokyo), `ap-northeast-2` (Seoul), `ap-northeast-3` (Osaka), `ap-southeast-1` (Singapore), `ap-southeast-2` (Sydney) |
-
-In a region that isn't published, users can copy a public AMI into their own account:
-
-```bash
-aws ec2 copy-image --source-region us-east-1 --source-image-id ami-... \
-  --region af-south-1 --name pangolin-community-arm64
-```
-
-### Public AMIs
-
-1. Turn off block public access for AMIs in every published region (it is on by default for new accounts):
-   ```bash
-   for r in us-east-1 us-east-2 us-west-1 us-west-2 ca-central-1 sa-east-1 \
-            eu-west-1 eu-west-2 eu-west-3 eu-central-1 eu-north-1 \
-            ap-south-1 ap-northeast-1 ap-northeast-2 ap-northeast-3 ap-southeast-1 ap-southeast-2; do
-     aws ec2 disable-image-block-public-access --region "$r"
-   done
-   ```
-2. Build with `ami_public = true`. Every regional copy is made public.
-
-Each regional copy is an EBS snapshot of about 3–4 GB of used data. All four AMIs in all 17 regions cost on the order of $10–15 per month per AMI version kept.
-
-Users can find the latest image by name:
-
-```bash
-aws ec2 describe-images --owners <PUBLISHER_ACCOUNT_ID> \
-  --filters 'Name=name,Values=pangolin-community-ubuntu-24.04-arm64-*' \
-  --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text
-```
-
-### AWS Marketplace
-
-The images are built to meet the Marketplace AMI policies:
-
-- Root login and password authentication are disabled. Access is SSH with a key as `ubuntu`, with the root password locked.
-- No credentials or keys are left in the image: Packer's temporary key and the SSH host keys are removed, `cloud-init clean` is run, the machine-id is reset, and logs and history are cleared.
-- The OS is fully patched at build time, and unattended security upgrades stay on.
-- IMDSv2 is required by default (`imds_support = v2.0`).
-- The AMI is unencrypted, as Marketplace requires. The CloudFormation template encrypts the volume at launch.
-
-Recommended listings are **Pangolin Community Edition** (free) and **Pangolin Enterprise Edition**. The Enterprise listing is free for personal use and businesses under $100k USD/yr, and commercial customers bring their own license key. For each listing:
-
-1. Build private AMIs (`ami_public = false`) in `us-east-1`.
-2. In the Marketplace Management Portal, add the AMI via **Assets → Amazon Machine Image**, giving the `AWSMarketplaceAMIIngestion` role access. Then run the security scan.
-3. Use the AMI ID as the product version. Add [`cloudformation/pangolin.yaml`](cloudformation/pangolin.yaml) as a CloudFormation delivery option for one-click launch. Set the recommended security group to TCP 22, 80, 443 and UDP 443, 51820, 21820.
-4. In the usage instructions, link to [Launching Pangolin](#launching-pangolin) below.
-
-Version notes should say that each AMI installs the latest Pangolin release at launch. The listing version tracks the OS image, not Pangolin.
-
----
-
-## Repository layout
-
-```
-pangolin.pkr.hcl               Packer template (sources per arch, 4 builds)
-scripts/                       Build-time provisioning (run in order)
-  010-base.sh                  OS patching and packages
-  020-docker.sh                Docker Engine + compose plugin
-  030-pangolin.sh              Installs files/, bakes edition, enables first-boot service
-  040-hardening.sh             SSH/password policy, fail2ban, unattended upgrades
-  900-cleanup.sh               Removes keys, state and logs before capture
-files/                         Copied to / on the image
-cloudformation/pangolin.yaml   One-click launch template
-examples/                      user-data samples and a CLI launch script
-iam/packer-policy.json         Minimum IAM permissions for building
-.github/workflows/             CI validate and build pipeline
 ```

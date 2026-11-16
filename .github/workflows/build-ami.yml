@@ -1,18 +1,18 @@
 name: Build AMIs
 
-# on:
-#   workflow_dispatch:
-#     inputs:
-#       builds:
-#         description: "Builds to run (comma separated: amd64,arm64)"
-#         default: "amd64,arm64"
-#       ami_public:
-#         description: "Make the AMIs public"
-#         type: boolean
-#         default: false
-#       ami_regions:
-#         description: 'Regions to publish to, as a JSON list (e.g. ["us-east-1","eu-central-1"]). Empty = all default regions; [] = build region only.'
-#         default: ""
+on:
+  workflow_dispatch:
+    inputs:
+      builds:
+        description: "Builds to run (comma separated: amd64,arm64)"
+        default: "amd64,arm64"
+      ami_public:
+        description: "Make the AMIs public"
+        type: boolean
+        default: false
+      ami_regions:
+        description: 'Regions to publish to, as a JSON list (e.g. ["us-east-1","eu-central-1"]). Empty = all default regions; [] = build region only.'
+        default: ""
 #   # Monthly rebuild so new launches start from a patched OS and Docker.
 #   # Pangolin itself is not baked in, so releases do not require a rebuild.
 #   schedule:

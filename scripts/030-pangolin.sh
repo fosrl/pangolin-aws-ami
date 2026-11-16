@@ -8,7 +8,12 @@ set -euo pipefail
 : "${AMI_VERSION:?AMI_VERSION must be set}"
 
 # Files uploaded by Packer to /tmp/pangolin-ami-files mirror the target paths.
-cp -a /tmp/pangolin-ami-files/. /
+# The upload is owned by the SSH user, so do NOT preserve ownership or modes
+# (no `cp -a`): that would stamp the staging directories' attributes onto
+# existing system directories such as /, /etc and /usr. Without preservation,
+# existing directories are left untouched and new files are created as root;
+# the explicit chown/chmod calls below then set the exact modes.
+cp -r --no-preserve=all /tmp/pangolin-ami-files/. /
 rm -rf /tmp/pangolin-ami-files
 
 chown -R root:root /usr/local/sbin/pangolin-setup /etc/pangolin /etc/systemd/system/pangolin-firstboot.service \
@@ -18,6 +23,7 @@ chmod 0755 /usr/local/sbin/pangolin-setup /etc/update-motd.d/99-pangolin
 chmod 0644 /etc/systemd/system/pangolin-firstboot.service /etc/profile.d/pangolin-setup.sh \
     /etc/docker/daemon.json /etc/ssh/sshd_config.d/60-pangolin.conf /etc/fail2ban/jail.local
 chmod 0755 /etc/pangolin
+chmod 0644 /etc/pangolin/setup.env.example
 
 cat >/etc/pangolin/ami.env <<EOM
 # Baked into the AMI at build time. Do not edit.

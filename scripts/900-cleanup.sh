@@ -7,6 +7,18 @@ apt-get -qqy autoremove --purge
 apt-get -qqy clean
 rm -rf /var/lib/apt/lists/*
 
+# Guard: nothing outside the default user's home (and volatile dirs) may be owned by
+# the default user (uid 1000), and / must be root:root 755. Fails the build rather
+# than shipping a broken image.
+bad=$(find / -xdev \( -path /home -o -path /tmp -o -path /var/tmp -o -path /run \) -prune -o \
+    -uid 1000 -print 2>/dev/null | head -20 || true)
+if [ -n "$bad" ] || [ "$(stat -c '%U:%G %a' /)" != "root:root 755" ]; then
+    echo "ERROR: unexpected ownership/permissions on the root filesystem:" >&2
+    stat -c '%n %U:%G %a' / >&2
+    echo "$bad" >&2
+    exit 1
+fi
+
 # Pangolin per-instance state must start empty.
 rm -f /etc/pangolin/setup.env
 rm -rf /var/lib/pangolin-ami/* /opt/pangolin/*
